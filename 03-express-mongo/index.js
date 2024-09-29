@@ -1,6 +1,7 @@
 // 1. SETUP EXPRESS
 const express = require('express');
 const cors = require('cors');
+const { ObjectId } = require('mongodb');
 const MongoClient = require('mongodb').MongoClient;
 const dbname = "recipes"; // CHANGE THIS TO YOUR ACTUAL DATABASE NAME
 
@@ -82,14 +83,14 @@ async function main() {
             // mongo shell: db.recipes.find({
             //   _id:ObjectId(id)
             //  })
-            let recipe = await db.collection('recipes').findOne({
+            let recipes = await db.collection('recipes').findOne({
                 "_id": new ObjectId(id)
             });
 
             // check the recipe is not null
             // because .findOne will return null if no document
             // not found
-            if (!recipe) {
+            if (!recipes) {
                 return res.status(404).json({
                     "error":"Sorry, recipie not found"
                 })
