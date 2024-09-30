@@ -3,6 +3,10 @@ const express = require('express');
 const cors = require('cors');
 const { ObjectId } = require('mongodb');
 const MongoClient = require('mongodb').MongoClient;
+
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+
 const dbname = "recipes"; // CHANGE THIS TO YOUR ACTUAL DATABASE NAME
 
 // enable dotenv (allow Express application to read .env files)
@@ -11,6 +15,62 @@ require('dotenv').config();
 // set the mongoUri to be MONGO_URI from the .env file
 // make sure to read data from process.env AFTER `require('dotenv').config()`
 const mongoUri = process.env.MONGO_URI;
+
+
+// function to generate an access token
+function generateAccessToken(id, email) {
+    // set the payload of the JWT (i.e, developers can add any data they want)
+    let payload = {
+        'user_id': id,
+        'email': email,
+    }
+
+    // create the JWT
+    // jwt.sign()
+    // - parameter 1: the payload (sometimes known as 'claims')
+    // - parameter 2: token secret,
+    // - parameter 3: options (to set expiresIn)
+    let token = jwt.sign(payload, process.env.TOKEN_SECRET, {
+        'expiresIn':'1h' // h for hour, d for days, m is for minutes and s is for seconds
+    });
+
+    return token;
+}
+
+
+// middleware: a function that executes before a route function
+function verifyToken(req,res, next) {
+    // get the JWT from the headers
+    let authHeader = req.headers['authorization'];
+    let token = null;
+    if (authHeader) {
+        // the token will be stored as in the header as:
+        // BEARER <JWT TOKEN>
+        token = authHeader.split(' ')[1];
+        if (token) {
+            // the callback function in the third parameter will be called after
+            // the token has been verified
+            jwt.verify(token, process.env.TOKEN_SECRET, function(err,payload){
+                if (err) {
+                    console.error(err);
+                    return res.sendStatus(403);
+                }
+                // save the payload into the request
+                req.user = payload;
+                // call the next middleware or the route function
+                next();
+                
+            })
+        } else {
+            return res.sendStatus(403); // forbidden status
+        }
+    } else {
+        return res.sendStatus(403); // forbidden status
+    }
+}
+
+
+
 
 // 1a. create the app
 const app = express();
@@ -47,7 +107,8 @@ async function main() {
 
     // There's a convention for RESTFul API when it comes to writing the URL
     // The URL should function like a file path  (always a resource, a noun)
-    app.get("/recipes", async function(req,res){
+    app.get("/recipes", verifyToken, async function (req, res) {
+    // app.get("/recipes", async function(req,res){
         try {
             // mongo shell: db.recipes.find({})
             // let recipes = await db.collection("recipes").find().toArray();
@@ -252,6 +313,87 @@ app.delete("/recipes/:id", async function(req,res){
         res.status(500);
     }
 })
+
+// route for user to sign up
+    // the user must provide an email and password
+    app.post('/users', async function (req, res) {
+
+        try {
+            let { email, password } = req.body;
+            if (!email || !password) {
+                return res.status(400).json({
+                    "error": "Please provide user name and password"
+                })
+            }
+
+            // if the request has both email and password
+            let userDocument = {
+                email,
+                password: await bcrypt.hash(password, 12) //12 cycles of hashing
+            };
+
+            let result = await db.collection("users").insertOne(userDocument);
+
+            res.json({
+                "message":"New user account has been created",
+                result
+            })
+
+        } catch (e) {
+            console.error(e);
+            res.status(500);
+        }
+    })
+
+        // the client is supposed to provide the email and password in req.body
+    app.post('/login', async function(req,res){
+        try {
+            let {email, password} = req.body;
+            if (!email || !password) {
+                return res.status(400).json({
+                    'message':'Please provide email and password'
+                })
+            }
+
+            // find the user by their email
+            let user = await db.collection('users').findOne({
+                "email": email
+            });
+
+            // if the user exists
+            if (user) {
+                // check the password (compare plaintext with the hashed one in the database)
+                if (bcrypt.compareSync(password, user.password)) {
+                    let accessToken = generateAccessToken(user._id, user.email);
+                    res.json({
+                        "accessToken": accessToken
+                    })
+                } else {
+                    res.status(401); //401 => unauthorised status
+                }
+            } else {
+                res.status(401); //401 => unauthorised status
+            }
+
+        } catch (e) {
+            console.error(e);
+            res.status(500);
+        }
+    })
+
+
+
+    app.get('/profile', verifyToken, async function(req, res){
+
+        // get the payload
+        let user = req.user;
+
+        res.json({
+            user
+        })
+
+    })
+    
 
 }
 main();
